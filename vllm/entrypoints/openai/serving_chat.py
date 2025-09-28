@@ -1463,19 +1463,32 @@ class OpenAIServingChat(OpenAIServing):
             self, logprobs: dict[int, Logprob], top_logprobs: Optional[int],
             tokenizer: AnyTokenizer,
             should_return_as_token_id: bool) -> list[ChatCompletionLogProb]:
-        return [
-            ChatCompletionLogProb(
-                token=(token := self._get_decoded_token(
-                    p[1],
-                    p[0],
-                    tokenizer,
-                    return_as_token_id=should_return_as_token_id,
-                )),
-                logprob=max(p[1].logprob, -9999.0),
-                bytes=list(token.encode("utf-8", errors="replace")),
-            ) for i, p in enumerate(logprobs.items())
-            if top_logprobs and i < top_logprobs
-        ]
+        if not top_logprobs:
+            # Explicitly handle None/0 which mean "don't return additional top logprobs".
+            return []
+
+        # A value of -1 means "all logprobs".
+        limit = None if top_logprobs == -1 else top_logprobs
+
+        results: list[ChatCompletionLogProb] = []
+        for index, (token_id, token_logprob) in enumerate(logprobs.items()):
+            if limit is not None and index >= limit:
+                break
+
+            decoded = self._get_decoded_token(
+                token_logprob,
+                token_id,
+                tokenizer,
+                return_as_token_id=should_return_as_token_id,
+            )
+            results.append(
+                ChatCompletionLogProb(
+                    token=decoded,
+                    logprob=max(token_logprob.logprob, -9999.0),
+                    bytes=list(decoded.encode("utf-8", errors="replace")),
+                ))
+
+        return results
 
     def _create_chat_logprobs(
         self,
